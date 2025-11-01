@@ -671,7 +671,7 @@ const detailHistory = async(req,res)=>{
             },
             {
                 model: modelPengajuanBarang,
-                attributes: ['id_pengajuan_barang'],
+                attributes: ['id_pengajuan_barang', 'id_barang'],
                 include: {
                     model: modelBarang,
                     attributes: ['nama_barang']
