@@ -45,7 +45,7 @@ const lihatKetersediaanBarang = async (req, res) => {
     try {
         const { tanggal_sewa, waktu_mulai, waktu_selesai } = req.body; 
 
-        // Validasi input wajib
+        // Validasi input wajib (TETAP SAMA)
         if (!tanggal_sewa || !waktu_mulai || !waktu_selesai) {
             return res.status(400).json({
                 success: false,
@@ -60,7 +60,8 @@ const lihatKetersediaanBarang = async (req, res) => {
                 'nama_barang',
                 'stok_tersedia',
                 [
-                    modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(SUM(`pengajuan_barangs`.`jumlah`), 0)'),
+                    // MENGHITUNG STOK TERPAKAI (COUNT)
+                    modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(COUNT(`pengajuan_barangs`.`id_barang`), 0)'),
                     'stok_tersedia_saat_ini'
                 ]
             ],
@@ -68,20 +69,23 @@ const lihatKetersediaanBarang = async (req, res) => {
                 {
                     model: modelPengajuanBarang,
                     attributes: [],
-                    required: false,
+                    // PENTING: REQUIRED: FALSE (DEFAULT/LEFT JOIN) untuk PengajuanBarang
+                    required: false, 
                     include: [
                         {
                             model: modelPengajuan,
                             attributes: [],
                             where: {
                                 tanggal_sewa,
-                               status: 'Disetujui',
+                                status: 'Disetujui',
                                 [Op.and]: [
                                     { waktu_mulai: { [Op.lt]: waktu_selesai } },
                                     { waktu_selesai: { [Op.gt]: waktu_mulai } },
                                 ]
                             },
-                            required: false
+                            // PENTING: REQUIRED: TRUE (INNER JOIN) untuk Pengajuan
+                            // Ini memastikan hanya PengajuanBarang yang memiliki Pengajuan yang memenuhi kriteria yang dihitung
+                            required: true 
                         }
                     ]
                 }
@@ -90,10 +94,12 @@ const lihatKetersediaanBarang = async (req, res) => {
                 stok_tersedia: { [Op.gt]: 0 }
             },
             group: ['barang.id_barang'],
-            having: modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(SUM(`pengajuan_barangs`.`jumlah`), 0) > 0'),
+            // KLAUSA HAVING MENGGUNAKAN COUNT
+            having: modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(COUNT(`pengajuan_barangs`.`id_barang`), 0) > 0'),
             order: [['nama_barang', 'ASC']]
         });
 
+        // Bagian hasil (TETAP SAMA)
         if (barangTersedia.length === 0) {
             return res.status(200).json({
                 success: true,
@@ -314,16 +320,19 @@ const tambahPengajuan = async (req, res) => {
             waktu_selesai,
             organisasi_komunitas,
             kegiatan,
-            barang_dipinjam
+            barang_dipinjam // Ini diasumsikan berisi JSON string yang di dalamnya ada array ID barang
         } = req.body;
 
-        let daftarBarang = [];
+        let daftarBarangIDs = []; // Diubah namanya untuk mencerminkan hanya menyimpan ID barang
         if (barang_dipinjam) {
             try {
+                // Asumsi: barang_dipinjam adalah JSON string yang berisi { "barang": ["id_barang_1", "id_barang_2", ...] }
                 const parsedObject = JSON.parse(barang_dipinjam);
+                
+                // PERUBAHAN UTAMA: Hanya mengambil array ID barang
                 if (parsedObject && Array.isArray(parsedObject.barang)) {
-                    
-                    daftarBarang = parsedObject.barang;
+                    // Kita asumsikan 'parsedObject.barang' sekarang berisi array ID barang, BUKAN objek {id_barang, jumlah}
+                    daftarBarangIDs = parsedObject.barang;
 
                 } else {
                     if (surat_peminjaman) {
@@ -333,7 +342,7 @@ const tambahPengajuan = async (req, res) => {
                     await transaction.rollback();
                     return res.status(400).json({
                         success: false,
-                        message: "Format data barang_dipinjam tidak valid: Key 'barang' tidak ditemukan atau bukan array."
+                        message: "Format data barang_dipinjam tidak valid: Key 'barang' tidak ditemukan atau bukan array ID barang."
                     });
                 }
             } catch (e) {
@@ -354,16 +363,17 @@ const tambahPengajuan = async (req, res) => {
             
             if (surat_peminjaman) {
                 const filePath = path.join(UPLOAD_DIR, surat_peminjaman);
-                await fs.promises.unlink(filePath); // Gunakan fs.promises untuk async/await
+                await fs.promises.unlink(filePath); 
             }
 
+            await transaction.rollback(); // Tambahkan rollback di sini juga
             return res.status(400).json({
                 success: false,
                 message: "Semua kolom wajib diisi, termasuk surat peminjaman."
             });
         }
         
-        // --- PENCEGAHAN OVERLAP JADWAL ---
+        // --- PENCEGAHAN OVERLAP JADWAL (TETAP SAMA) ---
         const existingPengajuan = await modelPengajuan.findOne({
             where: {
                 id_ruangan: id_ruangan,
@@ -383,31 +393,32 @@ const tambahPengajuan = async (req, res) => {
                 const filePath = path.join(UPLOAD_DIR, surat_peminjaman);
                 await fs.promises.unlink(filePath);
             }
-            
+            await transaction.rollback(); // Tambahkan rollback di sini
             return res.status(400).json({
                 success: false,
                 message: "Ruangan sudah dipesan (bertentangan) pada waktu tersebut.",
             });
         }
         
-        // --- BUAT PENGAJUAN BARU ---
+        // --- BUAT PENGAJUAN BARU (TETAP SAMA) ---
         const newPengajuan = await modelPengajuan.create({
             id_user: id_user,
             id_ruangan: id_ruangan,
             tanggal_sewa: tanggal_sewa,
             waktu_mulai: waktu_mulai,
             waktu_selesai: waktu_selesai,
-            surat_peminjaman: surat_peminjaman, // Simpan nama file ke DB
+            surat_peminjaman: surat_peminjaman, 
             organisasi_komunitas: organisasi_komunitas,
             kegiatan: kegiatan,
-            status: 'Disetujui'
+            status: 'Disetujui' 
         }, { transaction });
 
-        if (daftarBarang.length > 0) {
-            const itemsToCreate = daftarBarang.map(item => ({
+        // PERUBAHAN KEDUA UTAMA: Menyesuaikan BulkCreate
+        if (daftarBarangIDs.length > 0) {
+            const itemsToCreate = daftarBarangIDs.map(id_barang => ({
                 id_pengajuan: newPengajuan.id_pengajuan, // FK ke pengajuan utama
-                id_barang: item.id_barang,
-                jumlah: item.jumlah
+                id_barang: id_barang,
+                // Kolom 'jumlah' DIHAPUS karena tidak ada di tabel pengajuan_barang
             }));
 
             // BulkCreate ke tabel pengajuan_barang
@@ -418,13 +429,16 @@ const tambahPengajuan = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Pengajuan peminjaman berhasil dibuat. Menunggu persetujuan.",
+            message: "Pengajuan peminjaman berhasil dibuat",
             data: newPengajuan
         });
 
     } catch (error) {
         console.error("Kesalahan saat menambah pengajuan:", error);
         
+        // Pastikan rollback dilakukan jika terjadi kesalahan
+        await transaction.rollback(); 
+
         // 🔥 HAPUS FILE JIKA TERJADI KESALAHAN SERVER/DB (ROLLBACK)
         if (surat_peminjaman) {
             try {
@@ -462,24 +476,23 @@ const editPengajuan = async (req, res) => {
         } = req.body;
 
         if (!id_pengajuan) {
-            // Rollback jika ada file baru diupload dan id_pengajuan tidak ada
             if (surat_peminjaman_baru) {
-                await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
-            }
-            return res.status(400).json({ success: false, message: "ID Pengajuan harus disertakan." });
+                 await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
+             }
+             await transaction.rollback();
+             return res.status(400).json({ success: false, message: "ID Pengajuan harus disertakan." });
         }
         
         const pengajuanToEdit = await modelPengajuan.findByPk(id_pengajuan, { transaction });
 
         if (!pengajuanToEdit) {
-            // Hapus file baru jika data lama tidak ditemukan
             if (surat_peminjaman_baru) {
-                await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
-            }
-            return res.status(404).json({ success: false, message: "Pengajuan tidak ditemukan." });
+                 await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
+             }
+             await transaction.rollback();
+             return res.status(404).json({ success: false, message: "Pengajuan tidak ditemukan." });
         }
         
-        // Data yang akan di-update (mengambil nilai lama jika nilai baru tidak disediakan)
         const updatedFields = {
             id_ruangan: pengajuanToEdit.id_ruangan,
             tanggal_sewa: tanggal_sewa || pengajuanToEdit.tanggal_sewa,
@@ -487,36 +500,37 @@ const editPengajuan = async (req, res) => {
             waktu_selesai: waktu_selesai || pengajuanToEdit.waktu_selesai,
             organisasi_komunitas: organisasi_komunitas || pengajuanToEdit.organisasi_komunitas,
             kegiatan: kegiatan || pengajuanToEdit.kegiatan,
-            status: 'Disetujui' 
+            status: 'Disetujui'
         };
 
-        // Surat Peminjaman: Gunakan surat baru jika diunggah, jika tidak, gunakan surat lama
         const surat_peminjaman_lama = pengajuanToEdit.surat_peminjaman;
         if (surat_peminjaman_baru) {
             updatedFields.surat_peminjaman = surat_peminjaman_baru;
-        }  else {
+        }  else {
              updatedFields.surat_peminjaman = surat_peminjaman_lama;
         }
         
-        let daftarBarang = [];
+        let daftarBarangIDs = []; 
         if (barang_dipinjam) {
             try {
+                // Asumsi: barang_dipinjam adalah JSON string yang berisi { "barang": ["id_barang_1", "id_barang_2", ...] }
                 const parsedObject = JSON.parse(barang_dipinjam);
+                
                 if (parsedObject && Array.isArray(parsedObject.barang)) {
-                    daftarBarang = parsedObject.barang;
+                    // Hanya mengambil array ID barang (sesuai tambahPengajuan)
+                    daftarBarangIDs = parsedObject.barang; 
+
                 } else {
-                    // Hapus file baru jika format barang salah
                     if (surat_peminjaman_baru) {
                         await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
                     }
                     await transaction.rollback();
                     return res.status(400).json({
                         success: false,
-                        message: "Format data barang_dipinjam tidak valid: Key 'barang' tidak ditemukan atau bukan array."
+                        message: "Format data barang_dipinjam tidak valid: Key 'barang' tidak ditemukan atau bukan array ID barang."
                     });
                 }
             } catch (e) {
-                 // Hapus file baru jika gagal parsing JSON
                 if (surat_peminjaman_baru) {
                     await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
                 }
@@ -527,17 +541,13 @@ const editPengajuan = async (req, res) => {
                 });
             }
         }
-        
-        // ------------------------------------------
-        // PENCEGAHAN OVERLAP JADWAL
-        // ------------------------------------------
+
         const existingPengajuanOverlap = await modelPengajuan.findOne({
             where: {
-                // TIDAK termasuk ID pengajuan yang sedang di-edit
                 id_pengajuan: { [Op.ne]: id_pengajuan }, 
-                id_ruangan: pengajuanToEdit.id_ruangan, // Gunakan id_ruangan dari data lama (atau dari body jika diizinkan diubah)
+                id_ruangan: pengajuanToEdit.id_ruangan, 
                 status: { [Op.in]: ['Disetujui'] },
-                tanggal_sewa: updatedFields.tanggal_sewa, // Cek tanggal baru/lama
+                tanggal_sewa: updatedFields.tanggal_sewa, 
                 [Op.and]: [
                     { waktu_mulai: { [Op.lt]: updatedFields.waktu_selesai } }, 
                     { waktu_selesai: { [Op.gt]: updatedFields.waktu_mulai } }  
@@ -546,7 +556,6 @@ const editPengajuan = async (req, res) => {
         });
 
         if (existingPengajuanOverlap) {
-            // HAPUS FILE BARU JIKA TERJADI KONFLIK JADWAL
             if (surat_peminjaman_baru) {
                 await fs.promises.unlink(path.join(UPLOAD_DIR, surat_peminjaman_baru));
             }
@@ -557,6 +566,7 @@ const editPengajuan = async (req, res) => {
             });
         }
         
+        // 1. Update data pengajuan utama
         await pengajuanToEdit.update(updatedFields, { transaction });
         
         // 2. Kelola Barang Dipinjam (Hapus yang lama, buat yang baru)
@@ -564,15 +574,16 @@ const editPengajuan = async (req, res) => {
             where: { id_pengajuan: id_pengajuan }
         }, { transaction });
 
-        if (daftarBarang.length > 0) {
-            const itemsToCreate = daftarBarang.map(item => ({
-                id_pengajuan: id_pengajuan, // FK ke pengajuan utama
-                id_barang: item.id_barang,
-                jumlah: item.jumlah
+        // Buat data barang baru
+        if (daftarBarangIDs.length > 0) {
+            const itemsToCreate = daftarBarangIDs.map(id_barang => ({ // Iterasi langsung pada ID
+                id_pengajuan: id_pengajuan, 
+                id_barang: id_barang, 
             }));
 
-            // BulkCreate ke tabel pengajuan_barang
-            await modelPengajuanBarang.bulkCreate(itemsToCreate, { transaction }); 
+            await modelPengajuanBarang.bulkCreate(itemsToCreate, { 
+                transaction
+            }); 
         }
 
         // 3. Commit Transaksi
@@ -585,21 +596,19 @@ const editPengajuan = async (req, res) => {
                 await fs.promises.unlink(filePath);
             } catch (unlinkError) {
                 console.warn(`Peringatan: Gagal menghapus file lama ${surat_peminjaman_lama}:`, unlinkError.message);
-                // WARNING: Lanjutkan operasi meskipun gagal hapus file lama (karena update DB sudah berhasil)
             }
         }
 
         return res.status(200).json({
             success: true,
-            message: "Pengajuan peminjaman berhasil diperbarui. Menunggu persetujuan ulang.",
+            message: "Pengajuan peminjaman berhasil diperbarui.",
             data: pengajuanToEdit
         });
 
     } catch (error) {
         console.error("Kesalahan saat mengedit pengajuan:", error);
-        await transaction.rollback(); // Rollback transaksi jika ada kegagalan
+        await transaction.rollback(); 
         
-        // HAPUS FILE BARU JIKA TERJADI KESALAHAN SERVER/DB
         if (surat_peminjaman_baru) {
             try {
                 const filePath = path.join(UPLOAD_DIR, surat_peminjaman_baru);
@@ -662,7 +671,7 @@ const detailHistory = async(req,res)=>{
             },
             {
                 model: modelPengajuanBarang,
-                attributes: ['id_pengajuan_barang', 'jumlah'],
+                attributes: ['id_pengajuan_barang'],
                 include: {
                     model: modelBarang,
                     attributes: ['nama_barang']

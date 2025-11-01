@@ -16,10 +16,6 @@ const pengajuan_barang = sequelize.define('pengajuan_barang', {
         type: DataTypes.UUID,
         allowNull: false
     },
-    jumlah: {
-        type: DataTypes.INTEGER,
-        allowNull: false
-    },
     created_at: {
         type: DataTypes.DATE,
         allowNull: false
