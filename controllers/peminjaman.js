@@ -704,8 +704,15 @@ const hapusPengajuan = async (req, res) => {
             });
         }
 
-        const pengajuanToCancel = await modelPengajuan.findByPk(id_pengajuan, { transaction });
+        const pengajuanToCancel = await modelPengajuan.findOne({
+            where: {
+                id: id_pengajuan,
+                id_user: id_user, // Pastikan hanya pemilik yang bisa membatalkan
+            },
+            transaction 
+        });
 
+        
         if (!pengajuanToCancel) {
             await transaction.rollback();
             return res.status(404).json({
@@ -713,13 +720,16 @@ const hapusPengajuan = async (req, res) => {
                 message: "Pengajuan tidak ditemukan."
             });
         }
+        await pengajuanToCancel.update({ 
+            status: 'Dibatalkan',
+        }, { transaction });
         
         await transaction.commit();
         
 
         return res.status(200).json({
             success: true,
-            message: "Pengajuan peminjaman berhasil dihapus.",
+            message: "Pengajuan peminjaman berhasil Dibatalkan.",
             id_pengajuan: id_pengajuan
         });
 
