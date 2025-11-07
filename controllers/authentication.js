@@ -120,13 +120,13 @@ const register = async (req, res) => {
             nama: nama,
             username: username
         })
-        if (tambahAkun) {
-            res.status(200).json({
+       
+            return res.status(200).json({
                 success: true,
                 message: 'Akun berhasil terdaftar'
 
             })
-        }
+        
     } catch (error) {
         console.log(error);
         res.status(500).json({

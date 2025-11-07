@@ -3,6 +3,7 @@ require('dotenv').config()
 require('../models/associations')
 const sequelize = require('../config/db'); // atau '../config/db' sesuai struktur folder kamu
 const modelRuangan = require('../models/ruangan')
+const modelGambarRuangan = require('../models/gambar_ruangan')
 const modelBarang = require('../models/barang')
 const modelPengajuan = require('../models/pengajuan')
 const modelPengajuanBarang = require('../models/pengajuan_barang')
@@ -15,25 +16,46 @@ const {
     
 } = require('sequelize')
 
-const lihatRuangan = async (req,res)=>{
+const lihatRuangan = async (req, res) => {
     try {
-        const ruangan = await modelRuangan.findAll ({
-            attributes: ['id_ruangan', 'nama_ruangan', 'gambar']
-        })
+        const ruangan = await modelRuangan.findAll({
+            // Hanya ambil ID dan Nama Ruangan
+            attributes: ['id_ruangan', 'nama_ruangan'], 
+            
+            // Sertakan gambar dari tabel relasi
+            include: [{
+                model: modelGambarRuangan,       // Harus sesuai dengan alias di models/index.js
+                attributes: ['gambar'],    // Hanya ambil nama file gambar
+                limit: 1,                  // Batasi hanya 1 gambar yang diambil per ruangan
+                required: false            // 'left join' agar ruangan tanpa gambar tetap muncul
+            }]
+        });
+
         if (ruangan.length === 0) {
             return res.status(200).json({
                 success: true,
                 message: "Ruangan Belum Ada",
-                ruangan : []
+                ruangan: []
             })
         }
+
+        // Format ulang data agar lebih mudah dikonsumsi di frontend
+        const formattedRuangan = ruangan.map(r => ({
+            id_ruangan: r.id_ruangan,
+            nama_ruangan: r.nama_ruangan,
+            // deskripsi: r.deskripsi,
+            // Perbaikan utama: Menggunakan (r.GambarRuangan || []) untuk mencegah undefined
+            gambar: (r.gambar_ruangans || []).length > 0 ? r.gambar_ruangans[0].gambar : null,
+        }));
+
         return res.status(200).json({
             success: true,
             message: "Ruangan berhasil ditemukan",
-            ruangan: ruangan
+            ruangan: formattedRuangan
         })
+
     } catch (error) {
-        console.log(error);
+        console.error("Error saat melihat ruangan:", error);
         return res.status(500).json({
             success: false,
             message: "Internal server error"
@@ -135,7 +157,11 @@ const detailRuangan = async(req,res)=>{
         const detail = await modelRuangan.findOne({
             where:{
                 id_ruangan: id_ruangan
-            }
+            },
+            include:[{
+                model: modelGambarRuangan,
+                attributes: ['gambar']
+            }]
         })
         if (!id_ruangan) {
             return res.status(400).json({
@@ -632,10 +658,16 @@ const historyPengajuan = async (req,res)=>{
             where: {
                 id_user: id_user
             },
-            include: {
-                model: modelRuangan,
-                attributes: ['nama_ruangan', 'gambar']
-            }
+            include: [{
+                model: modelRuangan, // Include Ruangan
+                attributes: ['nama_ruangan', 'id_ruangan'], 
+                include: [{
+                    model: modelGambarRuangan, // Include Gambar Ruangan
+                    attributes: ['gambar'],
+                    limit: 1, 
+                    required: false 
+                }]
+            }]
         })
 
         if (history.length === 0) {
@@ -644,10 +676,42 @@ const historyPengajuan = async (req,res)=>{
                 message: "Belum Ada Riwayat Saat Ini"
             })
         }
+        const formattedHistory = history.map(item => {
+            // Dapatkan objek Ruangan (sesuai alias di atas, misal item.Ruangan)
+            const ruanganData = item.ruangan; 
+            
+
+            // Kembalikan objek yang diformat
+            return {
+                id_pengajuan: item.id_pengajuan, // Asumsi ada field ini
+                id_user: item.id_user,
+                id_ruangan: item.id_ruangan,
+                tanggal_sewa: item.tanggal_sewa, // Asumsi ada field ini
+                waktu_mulai: item.waktu_mulai, // Asumsi ada field ini
+                waktu_selesai: item.waktu_selesai, // Asumsi ada field ini
+                waktu_selesai: item.waktu_selesai, // Asumsi ada field ini
+                surat_peminjaman: item.surat_peminjaman, // Asumsi ada field ini
+                organisasi_komunitas: item.organisasi_komunitas, // Asumsi ada field ini
+                kegiatan: item.kegiatan, // Asumsi ada field ini
+                status: item.status, // Asumsi ada field ini
+                tujuan: item.tujuan, // Asumsi ada field ini
+                created_at: item.created_at, // Asumsi ada field ini
+                updated_at: item.updated_at, // Asumsi ada field ini
+                
+                // Detail Ruangan
+                ruangan: {
+                    
+                    nama_ruangan: ruanganData?.nama_ruangan,
+                    gambar: (ruanganData?.gambar_ruangans || []).length > 0 ? ruanganData.gambar_ruangans[0].gambar : null, // Nama gambar utama, bukan array
+                },
+                // Hapus properti relasi yang tidak diinginkan di level root
+                // Jika ada properti lain di modelPengajuan yang ingin Anda ambil, masukkan di sini
+            };
+        });
         return res.status(200).json({
             success: true,
             message: "Riwayat Ditemukan",
-            history: history
+            history: formattedHistory
         })
     } catch (error) {
         console.log(error);
