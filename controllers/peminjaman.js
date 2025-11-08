@@ -215,12 +215,12 @@ const lihatJadwalRuangan = async (req, res) => {
                     [Op.lte]: batasTanggal
                 }
             },
-            attributes: ['tanggal_sewa', 'waktu_mulai', 'waktu_selesai'], // Hanya ambil kolom yang dibutuhkan
+            attributes: ['tanggal_sewa', 'waktu_mulai', 'waktu_selesai', 'organisasi_komunitas'], // Hanya ambil kolom yang dibutuhkan
             include: [{
                 model: modelRuangan,
                 attributes: ['id_ruangan', 'nama_ruangan']
             }],
-            // raw: true // Untuk mendapatkan data object sederhana
+            raw: true // Untuk mendapatkan data object sederhana
         });
 
         if (jadwalAktif.length === 0) {
@@ -228,7 +228,8 @@ const lihatJadwalRuangan = async (req, res) => {
                 success: true,
                 message: "Tidak ada jadwal booking aktif untuk ruangan ini.",
                 ruangan: {},
-                tanggal_terbooking: []
+                tanggal_terbooking: [],
+                detail_booking_per_tanggal: {} // Tambahkan properti ini
             });
         }
        
@@ -246,6 +247,7 @@ const lihatJadwalRuangan = async (req, res) => {
         };
 
         const bookingPerTanggal = {};
+        const detailBookingPerTanggal = {}; // Untuk detail booking seperti di gambar
         jadwalAktif.forEach(booking => {
             
             // --- PERBAIKAN DI SINI ---
@@ -253,6 +255,9 @@ const lihatJadwalRuangan = async (req, res) => {
             // --- AKHIR PERBAIKAN ---
             
             const durasi = hitungDurasiBooking(booking.waktu_mulai, booking.waktu_selesai);
+            const waktuMulaiTampilan = booking.waktu_mulai.substring(0, 5); // Ambil HH:MM
+            const waktuSelesaiTampilan = booking.waktu_selesai.substring(0, 5); // Ambil HH:MM
+            const jamTampilan = `${waktuMulaiTampilan} - ${waktuSelesaiTampilan}`;
 
             if (!bookingPerTanggal[tanggal]) {
                 bookingPerTanggal[tanggal] = {
@@ -268,6 +273,17 @@ const lihatJadwalRuangan = async (req, res) => {
             } else {
                 bookingPerTanggal[tanggal].status = 'Partial';
             }
+            if (!detailBookingPerTanggal[tanggal]) {
+                // 2. Jika belum ada, inisialisasi sebagai array kosong []
+                detailBookingPerTanggal[tanggal] = [];
+            }
+            
+            detailBookingPerTanggal[tanggal].push({
+                // Perhatikan bahwa id_pengajuan tidak ada di attributes, ini hanya contoh visual
+                // Anda bisa menambahkan id_pengajuan jika diperlukan
+                organisasi_komunitas: booking.organisasi_komunitas,
+                waktu_booking: jamTampilan,
+            });
         });
 
         // 3. Gabungkan tanggal yang Full dan Partial untuk tampilan kalender
@@ -282,8 +298,10 @@ const lihatJadwalRuangan = async (req, res) => {
             success: true,
             message: `Berhasil mendapatkan status booking tanggal untuk ruangan `,
             // Data ini yang akan digunakan untuk menandai tanggal di kalender
-            tanggal_terbooking: tanggalUntukKalender 
-          
+            // Data ini digunakan untuk menandai tanggal di kalender (Status Full/Partial)
+            tanggal_terbooking: tanggalUntukKalender, 
+            // Data ini digunakan untuk menampilkan detail booking saat tanggal diklik
+            detail_booking_per_tanggal: detailBookingPerTanggal
         });
 
     } catch (error) {
