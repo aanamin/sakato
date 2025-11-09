@@ -20,9 +20,10 @@ const lihatReview = async (req, res) => {
         const review = await modelReview.findAll({
             include: {
                 model: modelPengajuan,
-                attributes: [],
+                attributes: ['id_user'],
                 include: {
-                    model: modelUser
+                    model: modelUser,
+                    attributes: ['nama']
                 }
             }
         })
@@ -32,10 +33,25 @@ const lihatReview = async (req, res) => {
                 message: "Belum Ada Review"
             })
         }
+        const reviews = review.map(item => {
+            const plainItem = item.get({ plain: true });
+            
+            // Asumsikan asosiasi dari Review ke Pengajuan bernama 'Pengajuan'
+            // dan dari Pengajuan ke User bernama 'User'
+            const namaUser = plainItem.pengajuan?.user?.nama; 
+
+            // Hapus Pengajuan (karena attributes: [] mungkin membuatnya muncul sebagai null)
+            delete plainItem.pengajuan; 
+            
+            return {
+                ...plainItem,
+                nama_user: namaUser || 'N/A' // Menambahkan field nama_user
+            };
+        });
         return res.status(200).json({
             success: true,
             message: "Review ditemukan",
-            review: review
+            reviews: reviews
         })
     } catch (error) {
         console.log(error);

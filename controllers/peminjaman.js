@@ -366,7 +366,8 @@ const tambahPengajuan = async (req, res) => {
             kegiatan,
             barang_dipinjam // Ini diasumsikan berisi JSON string yang di dalamnya ada array ID barang
         } = req.body;
-
+        console.log(barang_dipinjam);
+        
         let daftarBarangIDs = []; // Diubah namanya untuk mencerminkan hanya menyimpan ID barang
         if (barang_dipinjam) {
             try {
@@ -377,12 +378,13 @@ const tambahPengajuan = async (req, res) => {
                 if (parsedObject && Array.isArray(parsedObject.barang)) {
                     // Kita asumsikan 'parsedObject.barang' sekarang berisi array ID barang, BUKAN objek {id_barang, jumlah}
                     daftarBarangIDs = parsedObject.barang;
-
+                    
                 } else {
                     if (surat_peminjaman) {
                         const filePath = path.join(UPLOAD_DIR, surat_peminjaman);
                         await fs.promises.unlink(filePath);
                     }
+                    console.log("Format data barang_dipinjam tidak valid: Key 'barang' tidak ditemukan atau bukan array ID barang.");
                     await transaction.rollback();
                     return res.status(400).json({
                         success: false,
@@ -395,6 +397,8 @@ const tambahPengajuan = async (req, res) => {
                     await fs.promises.unlink(filePath);
                 }
                 await transaction.rollback();
+                console.log("Format data barang_dipinjam tidak valid (gagal parsing JSON).");
+                
                 return res.status(400).json({
                     success: false,
                     message: "Format data barang_dipinjam tidak valid (gagal parsing JSON)."
