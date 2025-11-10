@@ -65,7 +65,9 @@ const lihatRuangan = async (req, res) => {
 
 const lihatKetersediaanBarang = async (req, res) => {
     try {
-        const { tanggal_sewa, waktu_mulai, waktu_selesai } = req.body; 
+        // 1. Ambil id_pengajuan dari params
+        const idPengajuan = req.params.id_pengajuan;
+        const { tanggal_sewa, waktu_mulai, waktu_selesai } = req.body;
 
         // Validasi input wajib (TETAP SAMA)
         if (!tanggal_sewa || !waktu_mulai || !waktu_selesai) {
@@ -75,6 +77,24 @@ const lihatKetersediaanBarang = async (req, res) => {
             });
         }
 
+        // 2. Siapkan Kondisi Pengecualian id_pengajuan
+        let pengajuanWhereClause = {
+            tanggal_sewa,
+            status: 'Disetujui',
+            [Op.and]: [
+                { waktu_mulai: { [Op.lt]: waktu_selesai } },
+                { waktu_selesai: { [Op.gt]: waktu_mulai } },
+            ]
+        };
+
+        // Jika id_pengajuan tersedia (misalnya, saat pengeditan), tambahkan pengecualian ke WHERE clause.
+        if (idPengajuan) {
+            pengajuanWhereClause.id_pengajuan = {
+                [Op.ne]: idPengajuan // Mengecualikan id_pengajuan saat ini
+            };
+            console.log(`Mengecualikan Pengajuan ID: ${idPengajuan} dari perhitungan stok terpakai.`);
+        }
+
         // Query barang beserta stok yang masih tersedia
         const barangTersedia = await modelBarang.findAll({
             attributes: [
@@ -82,7 +102,7 @@ const lihatKetersediaanBarang = async (req, res) => {
                 'nama_barang',
                 'stok_tersedia',
                 [
-                    // MENGHITUNG STOK TERPAKAI (COUNT)
+                    // MENGHITUNG STOK TERSEDIA SAAT INI
                     modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(COUNT(`pengajuan_barangs`.`id_barang`), 0)'),
                     'stok_tersedia_saat_ini'
                 ]
@@ -91,23 +111,14 @@ const lihatKetersediaanBarang = async (req, res) => {
                 {
                     model: modelPengajuanBarang,
                     attributes: [],
-                    // PENTING: REQUIRED: FALSE (DEFAULT/LEFT JOIN) untuk PengajuanBarang
-                    required: false, 
+                    required: false,
                     include: [
                         {
                             model: modelPengajuan,
                             attributes: [],
-                            where: {
-                                tanggal_sewa,
-                                status: 'Disetujui',
-                                [Op.and]: [
-                                    { waktu_mulai: { [Op.lt]: waktu_selesai } },
-                                    { waktu_selesai: { [Op.gt]: waktu_mulai } },
-                                ]
-                            },
-                            // PENTING: REQUIRED: TRUE (INNER JOIN) untuk Pengajuan
-                            // Ini memastikan hanya PengajuanBarang yang memiliki Pengajuan yang memenuhi kriteria yang dihitung
-                            required: true 
+                            // 3. Gunakan klausa WHERE yang sudah disiapkan
+                            where: pengajuanWhereClause,
+                            required: true
                         }
                     ]
                 }
@@ -115,8 +126,8 @@ const lihatKetersediaanBarang = async (req, res) => {
             where: {
                 stok_tersedia: { [Op.gt]: 0 }
             },
-            group: ['barang.id_barang'],
-            // KLAUSA HAVING MENGGUNAKAN COUNT
+            group: ['barang.id_barang', 'barang.nama_barang', 'barang.stok_tersedia'], // Tambahkan kolom non-agregasi ke GROUP BY
+            // KLAUSA HAVING
             having: modelBarang.sequelize.literal('`barang`.`stok_tersedia` - COALESCE(COUNT(`pengajuan_barangs`.`id_barang`), 0) > 0'),
             order: [['nama_barang', 'ASC']]
         });
@@ -129,6 +140,7 @@ const lihatKetersediaanBarang = async (req, res) => {
                 barang: []
             });
         }
+
         const hasilSederhana = barangTersedia.map(item => ({
             id_barang: item.id_barang,
             nama_barang: item.nama_barang,
@@ -351,6 +363,47 @@ const lihatJadwalRuanganPerTanggal = async (req, res) => {
     }
 }
 
+const lihatJadwalRuanganPerTanggalForEdit = async (req, res) => {
+    try {
+        const { id_ruangan, tanggal_sewa, id_pengajuan } = req.params; 
+        
+        const jadwalDetail = await modelPengajuan.findAll({
+            where: {
+                id_pengajuan: {
+                    [Op.ne]: id_pengajuan
+                },
+                id_ruangan: id_ruangan, 
+                status: 'Disetujui',
+                // Membandingkan kolom tanggal_sewa dengan parameter tanggal dari URL
+                tanggal_sewa: tanggal_sewa 
+            },
+            // Hanya ambil waktu mulai dan waktu selesai
+            attributes: ['waktu_mulai', 'waktu_selesai', 'kegiatan'], 
+            order: [['waktu_mulai', 'ASC']],
+        });
+        
+        // 2. Format hasil
+        const dataSlotTerisi = jadwalDetail.map(pengajuan => ({
+            mulai: pengajuan.waktu_mulai,
+            selesai: pengajuan.waktu_selesai,
+            kegiatan: pengajuan.kegiatan 
+        }));
+        
+        return res.status(200).json({
+            success: true,
+            message: `Slot terisi untuk ruangan pada ${tanggal_sewa}.`,
+            data_slot_terisi: dataSlotTerisi
+        });
+
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        })
+    }
+}
+
 const tambahPengajuan = async (req, res) => {
     const UPLOAD_DIR = 'public/uploads/suratPeminjaman';
     const surat_peminjaman = req.uploadedFileName || (req.file ? req.file.filename : null);
@@ -504,6 +557,107 @@ const tambahPengajuan = async (req, res) => {
         });
     }
 };
+
+const lihatJadwalRuanganForEdit = async (req,res)=>{
+    const JAM_OPERASIONAL_MULAI = 7; 
+    const JAM_OPERASIONAL_SELESAI = 17;
+    const TOTAL_JAM_OPERASIONAL = JAM_OPERASIONAL_SELESAI - JAM_OPERASIONAL_MULAI; // 10 jam
+    try {
+        const {id_pengajuan, id_ruangan} =req.params
+        const hariIni = new Date();
+        hariIni.setHours(0, 0, 0, 0); 
+        const batasTanggal = new Date(hariIni);
+        batasTanggal.setMonth(batasTanggal.getMonth() + 6); // Ambil data 6 bulan ke depan
+
+        const jadwal = await modelPengajuan.findAll({
+            where:{
+                id_pengajuan:{
+                    [Op.ne]: id_pengajuan
+                },
+                id_ruangan: id_ruangan,
+                status: 'Disetujui',
+                tanggal_sewa: {
+                    [Op.gte]: hariIni,
+                    [Op.lte]: batasTanggal
+                }
+            },
+            attributes: ['tanggal_sewa', 'waktu_mulai', 'waktu_selesai', 'organisasi_komunitas'], // Hanya ambil kolom yang dibutuhkan
+            include: [{
+                model: modelRuangan,
+                attributes: ['id_ruangan', 'nama_ruangan']
+            }],
+            raw: true // Untuk mendapatkan data object sederhana
+        })
+
+         const hitungDurasiBooking = (waktu_mulai, waktu_selesai) => {
+            const start = new Date(`2000/01/01 ${waktu_mulai}`);
+            const end = new Date(`2000/01/01 ${waktu_selesai}`);
+            // Menghitung selisih waktu dalam jam (asumsi jam_mulai dan jam_selesai adalah string 'HH:MM:SS')
+            const durasiMs = end.getTime() - start.getTime();
+            return durasiMs / (1000 * 60 * 60); 
+        };
+
+        const bookingPerTanggal = {};
+        const detailBookingPerTanggal = {}; // Untuk detail booking seperti di gambar
+        jadwal.forEach(booking => {
+            
+            // --- PERBAIKAN DI SINI ---
+            const tanggal = booking.tanggal_sewa; // Ambil seluruh string 'YYYY-MM-DD'
+            // --- AKHIR PERBAIKAN ---
+            
+            const durasi = hitungDurasiBooking(booking.waktu_mulai, booking.waktu_selesai);
+            const waktuMulaiTampilan = booking.waktu_mulai.substring(0, 5); // Ambil HH:MM
+            const waktuSelesaiTampilan = booking.waktu_selesai.substring(0, 5); // Ambil HH:MM
+            const jamTampilan = `${waktuMulaiTampilan} - ${waktuSelesaiTampilan}`;
+
+            if (!bookingPerTanggal[tanggal]) {
+                bookingPerTanggal[tanggal] = {
+                    totalDurasi: 0,
+                    status: 'Partial'
+                };
+            }
+            bookingPerTanggal[tanggal].totalDurasi += durasi;
+
+            // Cek apakah tanggal sudah full-booked
+            if (bookingPerTanggal[tanggal].totalDurasi >= TOTAL_JAM_OPERASIONAL) {
+                bookingPerTanggal[tanggal].status = 'Full';
+            } else {
+                bookingPerTanggal[tanggal].status = 'Partial';
+            }
+            if (!detailBookingPerTanggal[tanggal]) {
+                // 2. Jika belum ada, inisialisasi sebagai array kosong []
+                detailBookingPerTanggal[tanggal] = [];
+            }
+            
+            detailBookingPerTanggal[tanggal].push({
+                // Perhatikan bahwa id_pengajuan tidak ada di attributes, ini hanya contoh visual
+                // Anda bisa menambahkan id_pengajuan jika diperlukan
+                organisasi_komunitas: booking.organisasi_komunitas,
+                waktu_booking: jamTampilan,
+            });
+        });
+         const tanggalUntukKalender = Object.keys(bookingPerTanggal)
+            .map(tanggal => ({
+                tanggal: tanggal,
+                status: bookingPerTanggal[tanggal].status 
+            }));
+
+        return res.status(200).json({
+            success: true,
+            message: "Jadwal Ditemukan",
+             tanggal_terbooking: tanggalUntukKalender, 
+            // Data ini digunakan untuk menampilkan detail booking saat tanggal diklik
+            detail_booking_per_tanggal: detailBookingPerTanggal
+        })
+    }
+    catch (error) {
+        console.log(error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        })
+    }
+}
 
 const editPengajuan = async (req, res) => {
     const UPLOAD_DIR = 'public/uploads/suratPeminjaman';
@@ -751,9 +905,10 @@ const detailHistory = async(req,res)=>{
             where: {
                 id_pengajuan: id_pengajuan
             },
+            attributes:['surat_peminjaman', 'organisasi_komunitas','kegiatan',],
             include: [{
                 model: modelRuangan,
-                attributes: ['nama_ruangan', 'gambar']
+                attributes: ['nama_ruangan']
             },
             {
                 model: modelPengajuanBarang,
@@ -848,5 +1003,8 @@ module.exports ={
     editPengajuan,
     historyPengajuan,
     detailHistory,
-    hapusPengajuan
+    hapusPengajuan,
+    lihatJadwalRuanganForEdit,
+    lihatJadwalRuanganPerTanggalForEdit,
+
 }
