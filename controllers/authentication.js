@@ -181,8 +181,115 @@ const editProfil = async (req,res)=>{
         })
     }
 }
+
+const lihatProfil = async (req,res)=>{
+    try {
+        const id_user = req.id_user
+        const profil = await modelUser.findOne({
+            where: {
+                id_user: id_user
+            },
+            attributes: ['email', 'nama', 'nohp', 'username','id_user']
+        })
+
+        if (!profil) {
+            return res.status(404).json({
+                success: false,
+                message: "Profil tidak ditemukan"
+            })
+        }
+        return res.status(200).json({
+            success: true, 
+            message: "Profil ditemukan",
+            profil: profil
+        })
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        })
+    }
+}
+
+const ubahPassword = async (req, res) => {
+    try {
+        // Ambil id_user dari request (diasumsikan sudah disuntikkan oleh middleware/otentikasi)
+        const id_user = req.id_user; 
+        
+        // Ambil password lama dan password baru dari body request
+        const {
+            oldPassword,
+            newPassword
+        } = req.body
+
+        // 1. Validasi Input Dasar
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Silahkan lengkapi password lama dan password baru'
+            })
+        }
+
+        // 2. Cari User Berdasarkan ID
+        const user = await modelUser.findOne({
+            where: {
+                id_user: id_user // Sesuaikan nama kolom ID di model Anda
+            }
+        })
+
+        // Cek apakah user ditemukan (seharusnya selalu ditemukan jika req.id_user valid)
+        if (!user) {
+            // Ini adalah kondisi yang tidak seharusnya terjadi jika otentikasi bekerja dengan benar
+            return res.status(404).json({
+                success: false,
+                message: 'User tidak ditemukan'
+            })
+        }
+
+        // 3. Verifikasi Password Lama
+        // Bandingkan password lama yang diinput dengan hash password di database
+        const isPasswordValid = bcrypt.compareSync(oldPassword, user.password);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: 'Password lama tidak cocok'
+            })
+        }
+
+        // 4. Hash Password Baru
+        const salt = bcrypt.genSaltSync(10);
+        const hashedNewPass = bcrypt.hashSync(newPassword, salt);
+
+        // 5. Update Password di Database
+        await modelUser.update({
+            password: hashedNewPass
+        }, {
+            where: {
+                id_user: id_user // Sesuaikan nama kolom ID
+            }
+        })
+
+        // 6. Respon Berhasil
+        return res.status(200).json({
+            success: true,
+            message: 'Password berhasil diubah'
+        })
+
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({
+            success: false,
+            message: 'Gagal mengubah password. Internal Server Error'
+        })
+    }
+}
+
 module.exports = {
     login,
     register,
-    editProfil
+    editProfil,
+    lihatProfil,
+    ubahPassword,
 }
