@@ -956,7 +956,7 @@ const hapusPengajuan = async (req, res) => {
 
         const pengajuanToCancel = await modelPengajuan.findOne({
             where: {
-                id: id_pengajuan,
+                id_pengajuan: id_pengajuan,
                 id_user: id_user, // Pastikan hanya pemilik yang bisa membatalkan
             },
             transaction 
